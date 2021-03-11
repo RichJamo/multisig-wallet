@@ -4,61 +4,67 @@ pragma abicoder v2;
 import "./Ownable.sol";
 
 contract Wallet is Ownable{
+    address[] public owners;
     
-    mapping(address => uint) balance;
+    struct Transfer{
+        uint transferID;
+        address payable recipient;
+        uint amount;
+        uint noOfApprovals;
+    }
+    
+    Transfer[] transferRequests;
+    
+    mapping(address => mapping(uint=>bool)) approvals; //a double mapping - remember it's similar to a dictionary!
    
     event depositDone(uint amount, address indexed depositedTo);
-    event TransferMade(uint amount, address indexed sentFrom, address indexed sentTo);
-   
-    address owner1;
-    address owner2;
-    address owner3;
+    event TransferRequestMade(uint amount, address indexed sentTo, uint transferID);
+
     uint sigsNeeded;
+    uint balance;
     
     constructor(address _owner1, address _owner2, address _owner3, uint _sigsNeeded) { //gets run only the first time the contract gets run? i.e. at 'setup'
        //owner = msg.sender;
-       owner1 = _owner1;
-       owner2 = _owner2;
-       owner3 = _owner3;
+       owners.push(_owner1); //make it possible to have as many owners as you like
+       owners.push(_owner2);
+       owners.push(_owner3);
        sigsNeeded = _sigsNeeded;
     }
     
-    function deposit () public payable returns (uint) { //this allows anyone to deposit
-       balance[msg.sender] += msg.value;
-       emit depositDone(msg.value, msg.sender);
-       return balance[msg.sender];
+    function approve (uint transferID, bool yesOrNo) public payable {
+        //require(msg.sender == owner1 || msg.sender == owner2 || msg.sender == owner3); //change this to check array rather!
+        approvals[msg.sender][transferID] == yesOrNo; //process the approval that's just come in
+        
+        transferRequests[transferID].noOfApprovals += 1; //increase number of approvals by 1 - what if it was marked false??
+        if (transferRequests[transferID].noOfApprovals >= sigsNeeded) { //check if enough approvals
+            address payable payableRecipient = transferRequests[transferID].recipient; //make the address payable
+            payableRecipient.transfer(transferRequests[transferID].amount); //makes the transfer if there are enough sigs
+        }
     }
-   
-    //function withdraw(uint amount) public returns (uint){
-    //    require  (balance[msg.sender] >= amount, "Balance not sufficient"); //make sure this address has sufficient balance at this contract
-    //    msg.sender.transfer(amount);    //transfer function has in-built error throwing
-    //    balance[msg.sender] -= amount;
-    //    return balance[msg.sender];
-   //}
+    
+    function deposit () public payable returns (uint) { //this allows anyone to deposit
+       balance += msg.value;
+       emit depositDone(msg.value, msg.sender);
+       return balance;
+    }
    
     function getBalance() public view returns (uint) {
-       return balance[msg.sender];
+       return balance; // how do I return the total balance of the wallet??
     }
    
-    function transfer (address recipient, uint amount) public {
-       require(balance[msg.sender] >= amount, "Balance not sufficient"); // if not the case, revert happens, transaction will not happen
-       require(msg.sender != recipient, "Don't transfer money to yourself");
+    function transfer (address payable _recipient, uint _amount) public {
+       require(balance >= _amount, "Balance not sufficient"); // if not the case, revert happens, transaction will not happen
+       //require(msg.sender == owner1 || msg.sender == owner2 || msg.sender == owner3);
+       uint transferID = transferRequests.length;
        
-       uint previousSenderBalance = balance[msg.sender];
+       Transfer memory t; //create a Transfer struct t
+       t.recipient = _recipient; //put data into t - could I do this in one line?
+       t.amount = _amount;
+       t.transferID = transferID;
+       t.noOfApprovals = 0;
        
-        _transfer(msg.sender, recipient, amount);
-       emit TransferMade(amount, msg.sender, recipient);
-       
-       //governmentInstance.addTransaction{value: 1 ether} (msg.sender, recipient, amount);
-       
-       //gwei = 10^9 
-       //ether = 10^18 
-       
-       assert(balance[msg.sender] == previousSenderBalance - amount);
+       transferRequests.push(t); //add t to the the array
+       emit TransferRequestMade(_amount, _recipient, transferID); //emit that a transfer request has been made
+       balance -= _amount; //decrease balance by the amount of the request - should this be done here? or only later when the transfer is actually made?
     }
-   
-    function _transfer (address from, address to, uint amount) private {
-       balance[from] -= amount;
-       balance[to] += amount;
-    } 
 }

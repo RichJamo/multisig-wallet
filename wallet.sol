@@ -4,67 +4,88 @@ pragma abicoder v2;
 import "./Ownable.sol";
 
 contract Wallet is Ownable{
+    //variables
     address[] public owners;
+    uint sigsNeeded;
+    uint balance;
     
+    //structs
     struct Transfer{
         uint transferID;
         address payable recipient;
         uint amount;
         uint noOfApprovals;
+        bool hasBeenSent;
     }
     
-    Transfer[] transferRequests;
-    
+    //mappings
     mapping(address => mapping(uint=>bool)) approvals; //a double mapping - remember it's similar to a dictionary!
    
+    //events    
     event depositDone(uint amount, address indexed depositedTo);
     event TransferRequestMade(uint amount, address indexed sentTo, uint transferID);
-
-    uint sigsNeeded;
-    uint balance;
+    event ApprovalReceived(uint _transferID, uint _approvals, address _approver);
+    event TransferApproved(uint _transferID);
     
-    constructor(address _owner1, address _owner2, address _owner3, uint _sigsNeeded) { //gets run only the first time the contract gets run? i.e. at 'setup'
-       //owner = msg.sender;
-       owners.push(_owner1); //make it possible to have as many owners as you like
-       owners.push(_owner2);
-       owners.push(_owner3);
+    //modifier
+    modifier onlyOwners(){ // only allow people in the owners list to execute 
+        bool owner = false;
+        for(uint i=0; i<owners.length; i++){
+            if(owners[i] == msg.sender){
+                owner=true;
+            }
+        }
+        require (owner==true, "Sender not an owner"); //if it's not true will throw an error
+        _;
+    }
+    
+    //constructor
+    constructor (address[] memory _owners, uint _sigsNeeded) { //gets run only the first time the contract gets run i.e. at 'setup'
+       owners = _owners;
        sigsNeeded = _sigsNeeded;
     }
-    
-    function approve (uint transferID, bool yesOrNo) public payable {
-        //require(msg.sender == owner1 || msg.sender == owner2 || msg.sender == owner3); //change this to check array rather!
-        approvals[msg.sender][transferID] == yesOrNo; //process the approval that's just come in
-        
-        transferRequests[transferID].noOfApprovals += 1; //increase number of approvals by 1 - what if it was marked false??
-        if (transferRequests[transferID].noOfApprovals >= sigsNeeded) { //check if enough approvals
-            address payable payableRecipient = transferRequests[transferID].recipient; //make the address payable
-            payableRecipient.transfer(transferRequests[transferID].amount); //makes the transfer if there are enough sigs
-        }
-    }
-    
-    function deposit () public payable returns (uint) { //this allows anyone to deposit
+
+    Transfer[] transferRequests; //create a instance of a struct to hold the transfer requests
+  
+    function deposit () public payable returns (uint) { //this allows anyone to deposit - this could be an empty function!
        balance += msg.value;
        emit depositDone(msg.value, msg.sender);
        return balance;
     }
-   
-    function getBalance() public view returns (uint) {
-       return balance; // how do I return the total balance of the wallet??
-    }
-   
-    function transfer (address payable _recipient, uint _amount) public {
+       
+    function transfer (address payable _recipient, uint _amount) public onlyOwners{
        require(balance >= _amount, "Balance not sufficient"); // if not the case, revert happens, transaction will not happen
-       //require(msg.sender == owner1 || msg.sender == owner2 || msg.sender == owner3);
-       uint transferID = transferRequests.length;
        
-       Transfer memory t; //create a Transfer struct t
-       t.recipient = _recipient; //put data into t - could I do this in one line?
-       t.amount = _amount;
-       t.transferID = transferID;
-       t.noOfApprovals = 0;
+       transferRequests.push(
+           Transfer(transferRequests.length, _recipient, _amount, 0, false) // add this latest transfer request to the transferRequests array
+           );
        
-       transferRequests.push(t); //add t to the the array
-       emit TransferRequestMade(_amount, _recipient, transferID); //emit that a transfer request has been made
+       emit TransferRequestMade(_amount, _recipient, transferRequests.length-1); //emit that a transfer request has been made
        balance -= _amount; //decrease balance by the amount of the request - should this be done here? or only later when the transfer is actually made?
     }
+    
+    function approve (uint _transferID) public payable onlyOwners {
+        require(approvals[msg.sender][_transferID] == false); //check that this person hasn't approved this transaction already
+        require(transferRequests[_transferID].hasBeenSent == false);
+        
+        approvals[msg.sender][_transferID] == true; //set that this person has now approved this transaction (can't do it again)
+        transferRequests[_transferID].noOfApprovals++; //increase number of approvals by 1
+        emit ApprovalReceived(_transferID, transferRequests[_transferID].noOfApprovals, msg.sender);
+        
+        if (transferRequests[_transferID].noOfApprovals >= sigsNeeded) { //check if enough approvals
+            transferRequests[_transferID].hasBeenSent = true;
+            address payable payableRecipient = transferRequests[_transferID].recipient; //make the address payable
+            payableRecipient.transfer(transferRequests[_transferID].amount); //makes the transfer
+            emit TransferApproved(_transferID);
+        }
+    }
+   
+    function getBalance() public view returns (uint) {
+       return balance; 
+    }
+    
+    function getTransferRequests() public view returns (Transfer[] memory){
+        return transferRequests;
+    }
+
 }
